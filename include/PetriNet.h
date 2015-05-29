@@ -32,7 +32,7 @@ public:
 	virtual ~PetriNet();
 
 	void advance(const matrix<int>&);//takes a characteristic vector as an argument
-	virtual void advance();
+	virtual bool advance();
 	void printMarking();
 	void printIncidence();
 	void printConflict();

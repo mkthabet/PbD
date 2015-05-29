@@ -106,42 +106,16 @@ void testHLPN() {
 	streamBundle1.addStream(handStream1);
 	HLPN pn;
 	pn.constructPN(streamBundle1);
-	pn.printMarking();
+	pn.initPN(0.3);
 	pn.printIncidence();
 	pn.printConflict();
 	pn.printExprMatrix();
-	pn.printEnabledList();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
-	pn.advance();
-	pn.printMarking();
-	pn.printPlaces();
+	pn.printState();
+	while (pn.advance()){
+		pn.printState();
+	}
+
+
 //	std::cout << pn.getEnabledList() << std::endl;
 //	std::cout << s1 << std::endl;
 //	pn.advance(s1);

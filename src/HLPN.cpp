@@ -15,6 +15,7 @@ namespace PN {
 HLPN::HLPN() :
 		PetriNet() {
 	componentCount = 0;
+	constructed = false;
 }
 
 void HLPN::constructNaivePN(StreamBundle& bundle) {
@@ -28,6 +29,7 @@ void HLPN::constructNaivePN(StreamBundle& bundle) {
 	Symbol s;
 	Place p(0, s);
 	p.type = Place::START;
+	p.init_token_cnt = 1;	//the start place should always have a token in the initial marking
 	addPlace(p);
 	Transition t(0);
 	addTransition(t);
@@ -50,7 +52,7 @@ void HLPN::constructNaivePN(StreamBundle& bundle) {
 			dummy.setComponentId(s.getComponentId());// give it the same component ID
 			//now add a place for the dummy wait symbol and bind it to the last transition
 			p = Place(placeCount, dummy);
-			p.type = Place::AUTO ;
+			p.type = Place::AUTO;
 			addPlace(p);
 			double expr;	//the input arc expression
 			Place pBefore =
@@ -70,6 +72,10 @@ void HLPN::constructNaivePN(StreamBundle& bundle) {
 			if (rit->getSymbol().getComponentId() == s.getComponentId()) {
 				// create new t and bind it as o/p to the found p
 				t = Transition(transitionCount);	//create new transition
+//				if (rit->getSymbol().getPrimitiveId() == 0
+//						|| rit->type == Place::ORDINARY) {//if it's an ordinary wait place
+//					t.delay = rit->getSymbol().getDuration();//set the t's delay to the duration of the i/p wait place
+//				}
 				addTransition(t);
 				//get arc expression = new_place_time / previous_place_duration
 				double expr = s.getDuration() / rit->getSymbol().getDuration();
@@ -89,6 +95,7 @@ HLPN::~HLPN() {
 
 PN::HLPN::HLPN(int p, int t) :
 		PetriNet(p, t) {
+	constructed = false;
 }
 
 PN::HLPN::HLPN(int p, int t, const matrix<int>& m, const matrix<int>& w) :
@@ -142,52 +149,83 @@ void HLPN::constructPN(StreamBundle& bundle) {
 	constructNaivePN(bundle);
 	consolidateConcurrency();
 	fold();
-	constructIncidence();
-	marking.resize(placeCount, 1);
-	marking.clear();
-	marking(0, 0) = 1;
-	Token token;
-	token.value = 1;
-	placeList[0].addToken(token);
-	charVector.resize(transitionCount, 1);
-	charVector.clear();
-	CalculateConflictMatrix();
+	constructed = true;
 }
 
-void HLPN::advance() {
-
-	PetriNet::advance();
-// update tokens in places
+bool HLPN::advance() {
+	charVector.clear();
+	std::vector<int> enabled_list(getEnabledList());
+	if (enabled_list.size() == 0) {
+		return false;
+	}
+	updateTimedTransitions(enabled_list);
+	std::vector<int> fireList(getFireList(enabled_list));// a list of transitions to fire initialized with enabled transitions
+	// now check for conflicts in the fire list and resolve them
+	for (std::vector<int>::iterator it1 = fireList.begin();
+			it1 != fireList.end(); ++it1) {	//for each enabled transition in list
+//		printList(fireList);
+		for (std::vector<int>::iterator it2 = it1 + 1; it2 != fireList.end();
+				++it2) {	//test against following entries
+			if (conflict(*it1, *it2)) {
+				int transitionToErase = resolveConflict(*it1, *it2);
+				if (transitionToErase == *it2) {
+					fireList.erase(it2);
+				} else {
+					fireList.erase(it1);
+				}
+				it1--;//restart this iteration of outer loop since deleting  entry may lead to skipping one or bad indexing
+				break;
+			}
+		}
+	}
+	// convert fireList into characteristic vector
+	for (unsigned int i = 0; i < fireList.size(); i++) {
+		charVector(fireList[i], 0) = 1;
+	}
+	PetriNet::advance(charVector);	//does matrix algebra to update marking;
+	// update tokens in places and reset delay times on timed t's
 	for (int j = 0; j < transitionCount; j++) {	//go thru all transitions
 		if (charVector(j, 0) == 1) {	//if transition i has just fired
 			Token token;	//token that will be fetched
+			Place* p; //an alias for the place being processed for readability;
 			for (unsigned int i = 0;
-					i < transitionList[j].getInputPlacesIDs().size(); i++) {//go thru all i/p places
-				for (int k = 0;
-						k
-								< placeList[transitionList[j].getInputPlacesIDs()[i]].getTokenCount();
-						k++) {
-					if (placeList[transitionList[j].getInputPlacesIDs()[i]].tokens[k].value
-							!= 0) {
-						token.value =
-								placeList[transitionList[j].getInputPlacesIDs()[i]].tokens[k].value;
+					i < transitionList[j].getInputPlacesIDs().size(); i++) { //go thru all i/p places
+				p = &(placeList[transitionList[j].getInputPlacesIDs()[i]]);
+				for (int k = 0; k < p->getTokenCount(); k++) { //go thru all tokens
+					if (p->tokens[k].value != 0) {	//if this is a colored token
+						token.value = p->tokens[k].value;
 					}
 				}// for each transition there will always be a max of 1 i/p place with non-zero token
-				placeList[transitionList[j].getInputPlacesIDs()[i]].empty();//remove all tokens
+				p->empty();	//remove all tokens
+				if (p->getTokenCount() != marking(p->ID, 0)) {
+					std::cout
+							<< "[HPLN::advance()] Warning: Token count mismatch for place "
+							<< p->ID << std::endl;
+				}
 			}
 			for (unsigned int i = 0;
 					i < transitionList[j].getOutputPlacesIDs().size(); i++) {//go thru all o/p places
 				Token tok;	//token to be deposited
-				tok.value =
-						token.value
-								* exprMatrix(
-										placeList[transitionList[j].getOutputPlacesIDs()[i]].getId(),
-										transitionList[j].getId());	// do value transformation
-				placeList[transitionList[j].getOutputPlacesIDs()[i]].addToken(
-						tok);	//deposit token
+				p = &(placeList[transitionList[j].getOutputPlacesIDs()[i]]);
+				tok.value = token.value
+						* exprMatrix(p->getId(), transitionList[j].getId());// do value transformation
+				p->addToken(tok);	//deposit token
+				for (unsigned int k = 0;
+						k < p->getOutputTransitionsIDs().size(); k++) {	//go thru all o/p t's of that place
+					if (transitionList[p->getOutputTransitionsIDs()[k]].isTimed()) {
+						transitionList[p->getOutputTransitionsIDs()[k]].resetDelay(
+								time_seed_value);
+					}
+				}
+				if (p->getTokenCount() != marking(p->ID, 0)) {
+					std::cout
+							<< "[HPLN::advance()] Warning: Token count mismatch for place "
+							<< p->ID << std::endl;
+				}
 			}
 		}
 	}
+	return true;
 }
 
 void HLPN::printPlaces(bool onlyActive) {
@@ -257,15 +295,14 @@ bool HLPN::findRepetition(int& l, int& c, int& s, std::vector<Place>& pList) {
 	std::vector<Place>::iterator it;
 	for (it = pList.begin() + 1; it != pList.end(); it++) {
 		if (it->type != Place::ORDINARY) {
-			pList.erase(it);//delete the place if it's an auto-created wait place at the start of a component stream
-			break;
+			pList.erase(it--);//delete the place if it's an auto-created wait place at the start of a component stream
 		}
 	}
 	int count = 0;	//repetition count
 	std::vector<Place>::iterator found_it;	//search result
 	std::vector<Place>::iterator search_it;	//search window start
 	for (int length = (pList.size() - 1) / 2; length > 1; length--) {
-		int startPos = 1;	// start position of the repetition sequence in new list
+		int startPos = 1;// start position of the repetition sequence in new list
 		for (it = pList.begin() + 1; it + 2 * length - 1 != pList.end(); it++) {
 			search_it = it + length;
 			while (1) {
@@ -340,6 +377,7 @@ void HLPN::fold() {
 	int length, count, startPos;
 	std::vector<Place> pList;
 	while (findRepetition(length, count, startPos, pList)) {//params passed by reference
+//		int i, j;
 		for (int j = 1; j <= count; j++) {
 			for (int i = 0; i < length; i++) {
 				if (placeList[pList[startPos + i].ID]
@@ -353,6 +391,50 @@ void HLPN::fold() {
 			}
 		}
 		updateLists();
+		//determine the loop transition to add the count place as i/p to it
+		//these are t's that has an i/p and o/p p's of the same component and the i/p has a greater id that the o/p p
+		for (unsigned int i = 0; i < transitionList.size(); i++) {
+			bool found = false;
+			for (unsigned int j = 0;
+					j < transitionList[i].inputPlacesIDs.size(); j++) {
+				for (unsigned int k = 0;
+						k < transitionList[i].outputPlacesIDs.size(); k++) {
+					if ((placeList[transitionList[i].inputPlacesIDs[j]].getSymbol().getComponentId()
+							== placeList[transitionList[i].outputPlacesIDs[k]].getSymbol().getComponentId())
+							&& (placeList[transitionList[i].inputPlacesIDs[j]].ID
+									> placeList[transitionList[i].outputPlacesIDs[k]].ID)) {
+						found = true;
+						break;	//no need to check the rest of o/p places
+					}
+
+				}
+				if (found) {
+					break;//no need to check the rest of i/p places
+				}
+			}
+			if (found){
+				// check that it doesn't already have an i/p count place from previous runs
+				for (unsigned int j = 0;
+									j < transitionList[i].inputPlacesIDs.size(); j++){
+					if (placeList[transitionList[i].inputPlacesIDs[j]].type == Place::COUNT){
+						found = false;	//nope, false alarm
+						break;	//no need to check the rest of i/p places
+					}
+				}
+			}
+			if (found){	//if it doesn't already have an i/p count place
+				//create it
+				Place p (placeCount, Symbol());	//dummy symbol
+				p.type = Place::COUNT;
+				p.init_token_cnt = count;
+				addPlace(p);
+				// bind it as input to the t being process. expr is zero because the colorset of this place is boolean
+				bind(p, transitionList[i] , 1 , 0);
+
+				// if you're reading this code...sorry :) but it's actually the easiest way
+				//I hope the comments make it better though
+			}
+		}
 	}
 }
 
@@ -367,8 +449,8 @@ void HLPN::merge(Place& p1, Place& p2) {
 	placeCount--;	// a place will be absorbed (deleted) here
 	p2.marked4Deletion = true;
 	for (unsigned int i = 0; i < p2.inputTransitionsIDs.size(); i++) {//go thru all p2 i/p t's
-		Transition* t = &transitionList[p2.inputTransitionsIDs[i]];//define alias for more readable code
-		if (t->marked4Deletion){
+		Transition* t = &transitionList[p2.inputTransitionsIDs[i]];	//define alias for more readable code
+		if (t->marked4Deletion) {
 			continue;
 		}
 		bool tFound = false;//assume this t is not found in p1 i/p t's by default
@@ -402,7 +484,7 @@ void HLPN::merge(Place& p1, Place& p2) {
 	// Do the exact same thing as above but for o/p t's
 	for (unsigned int i = 0; i < p2.outputTransitionsIDs.size(); i++) { //go thru all p2 o/p t's
 		Transition* t = &transitionList[p2.outputTransitionsIDs[i]]; //define alias for more readable code
-		if (t->marked4Deletion){
+		if (t->marked4Deletion) {
 			continue;
 		}
 		bool tFound = false; //assume this t is not found in p1 i/p t's by default
@@ -447,18 +529,18 @@ void HLPN::updateLists() {
 	for (unsigned int i = 0; i < placeList.size(); i++) {//go thru all places in old list
 		if (!placeList[i].marked4Deletion) {	//if this place is to be kept
 			pList.push_back(placeList[i]);	//copy it to the new list
-			pList.back().inputTransitionsIDs.clear();	//will be reconstructed later when updating arcs
+			pList.back().inputTransitionsIDs.clear();//will be reconstructed later when updating arcs
 			pList.back().outputTransitionsIDs.clear();
 			if (pList.back().ID != pList.size() - 1) {//if there has been deletions before this place
 				pList.back().ID = pList.size() - 1;	//modify its ID to be equal to its index
 				for (unsigned int j = 0; j < TPArcs.size(); j++) {
 					if (TPArcs[j].placeID == placeList[i].ID) { //find arcs to the old p
-						TPArcs[j].placeID = pList.back().ID;	//update them to store the new ID
+						TPArcs[j].placeID = pList.back().ID; //update them to store the new ID
 					}
 				}
-				for (unsigned int j = 0; j < PTArcs.size(); j++) {	//same thing but for o/p arcs
+				for (unsigned int j = 0; j < PTArcs.size(); j++) { //same thing but for o/p arcs
 					if (PTArcs[j].placeID == placeList[i].ID) { //find arcs from the old p
-						PTArcs[j].placeID = pList.back().ID;	//update them to store the new ID
+						PTArcs[j].placeID = pList.back().ID; //update them to store the new ID
 					}
 				}
 			}
@@ -469,30 +551,30 @@ void HLPN::updateLists() {
 	std::vector<Transition> tList;	//new transition list
 	tList.reserve(transitionCount);
 	for (unsigned int i = 0; i < transitionList.size(); i++) {//go thru all t's in old list
-		if (!transitionList[i].marked4Deletion) {	//if this transition is to be kept
+		if (!transitionList[i].marked4Deletion) {//if this transition is to be kept
 			tList.push_back(transitionList[i]);	//copy it to the new list
-			tList.back().inputPlacesIDs.clear();	//will be reconstructed later when updating arcs
+			tList.back().inputPlacesIDs.clear();//will be reconstructed later when updating arcs
 			tList.back().outputPlacesIDs.clear();
 			if (tList.back().ID != tList.size() - 1) {//if there has been deletions before this transition
 				tList.back().ID = tList.size() - 1;	//modify its ID to be equal to its index
 				for (unsigned int j = 0; j < TPArcs.size(); j++) {
 					if (TPArcs[j].transitionID == transitionList[i].ID) { //find arcs from the old t
-						TPArcs[j].transitionID = tList.back().ID;	//update them to store the new ID
+						TPArcs[j].transitionID = tList.back().ID; //update them to store the new ID
 					}
 				}
-				for (unsigned int j = 0; j < PTArcs.size(); j++) {	//same thing but for o/p arcs
+				for (unsigned int j = 0; j < PTArcs.size(); j++) { //same thing but for o/p arcs
 					if (PTArcs[j].transitionID == transitionList[i].ID) { //find arcs to the old t
-						PTArcs[j].transitionID = tList.back().ID;	//update them to store the new ID
+						PTArcs[j].transitionID = tList.back().ID; //update them to store the new ID
 					}
 				}
 			}
-		} else {	// if the t is to be deleted, then delete all associated arcs
+		} else { // if the t is to be deleted, then delete all associated arcs
 			for (unsigned int j = 0; j < TPArcs.size(); j++) {
 				if (TPArcs[j].transitionID == transitionList[i].ID) { //find arcs to the old t
 					TPArcs[j].marked4Deletion = true;	//delete arc
 				}
 			}
-			for (unsigned int j = 0; j < PTArcs.size(); j++) {	//same thing but for i/p arcs
+			for (unsigned int j = 0; j < PTArcs.size(); j++) {//same thing but for i/p arcs
 				if (PTArcs[j].transitionID == transitionList[i].ID) { //find arcs to the old t
 					PTArcs[j].marked4Deletion = true;	//delete arc
 				}
@@ -502,26 +584,122 @@ void HLPN::updateLists() {
 	transitionList = tList;	//replace the old t list with the new
 	// Update arc lists and use them to update bindings in p's and t's
 	std::vector<Arc> aList;
-	for (unsigned int i = 0 ; i < PTArcs.size() ; i++){
-		if(!PTArcs[i].marked4Deletion){
+	for (unsigned int i = 0; i < PTArcs.size(); i++) {
+		if (!PTArcs[i].marked4Deletion) {
 			aList.push_back(PTArcs[i]);
-			placeList[PTArcs[i].placeID].addOutputTransition(PTArcs[i].transitionID);
-			transitionList[PTArcs[i].transitionID].addInputPlace(PTArcs[i].placeID);
+			placeList[PTArcs[i].placeID].addOutputTransition(
+					PTArcs[i].transitionID);
+			transitionList[PTArcs[i].transitionID].addInputPlace(
+					PTArcs[i].placeID);
 		}
 	}
 	PTArcs = aList;
 	aList.clear();
-	for (unsigned int i = 0 ; i < TPArcs.size() ; i++){
-		if(!TPArcs[i].marked4Deletion){
+	for (unsigned int i = 0; i < TPArcs.size(); i++) {
+		if (!TPArcs[i].marked4Deletion) {
 			aList.push_back(TPArcs[i]);
-			placeList[TPArcs[i].placeID].addInputTransition(TPArcs[i].transitionID);
-			transitionList[TPArcs[i].transitionID].addOutputPlace(TPArcs[i].placeID);
+			placeList[TPArcs[i].placeID].addInputTransition(
+					TPArcs[i].transitionID);
+			transitionList[TPArcs[i].transitionID].addOutputPlace(
+					TPArcs[i].placeID);
 		}
 	}
 	TPArcs = aList;
 }
+
+void HLPN::updateTimedTransitions(std::vector<int>& enabled_list) {
+	for (unsigned int i = 0; i < enabled_list.size(); i++) {
+		if (transitionList[enabled_list[i]].isTimed()) {
+			transitionList[enabled_list[i]].timeRemaining -= time_step;
+			if (transitionList[enabled_list[i]].timeRemaining < 0.0) {
+				transitionList[enabled_list[i]].timeRemaining = 0.0;
+			}
+		}
+	}
+}
+
+std::vector<int> HLPN::getFireList(std::vector<int>& enabled_list) {
+	std::vector<int> fire_list;
+	for (unsigned int i = 0; i < enabled_list.size(); i++) {
+		if (transitionList[enabled_list[i]].isTimed()
+				&& (transitionList[enabled_list[i]].timeRemaining > 0.0)) {
+			continue;	//don't push this t and skip to the next one in the list
+		}
+		fire_list.push_back(enabled_list[i]);
+	}
+	return fire_list;
+}
+
+//std::vector<int> HLPN::getEnabledList() const {
+//	std::vector<int> enabledList;
+//		for (int i=0; i<placeCount; i++){	//examine each element corresponding to a place
+//			if (marking(i,0) > 0){	//if this place is not empty
+//				for (int j=0 ; j<placeList[i].outputTransitionsIDs.size() ; i++) {
+//
+//				}
+//			}
+//		}
+//	return enabledList;
+//}
+
+bool HLPN::advance(double time_step) {
+	this->time_step = time_step;
+	return advance();
+}
+
+void HLPN::initPN(double time_step, double time_seed_value) {
+	// inits PN for execution
+	if (!constructed) {
+		std::cout << "Error: you must construct or load the PN first!"
+				<< std::endl;
+		exit(1);
+	}
+	this->time_step = time_step;
+	this->time_seed_value = time_seed_value;
+	initMarking();
+	constructIncidence();
+	charVector.resize(transitionCount, 1);
+	charVector.clear();
+	CalculateConflictMatrix();
+}
+
 void HLPN::printExprMatrix() {
 	std::cout << "Expr: " << exprMatrix << std::endl;
+}
+
+void HLPN::printTransitions(bool enabled_only) {
+	if (enabled_only) {
+		std::vector<int> enabled_list = getEnabledList();
+		for (unsigned int i = 0; i < enabled_list.size(); i++) {
+			transitionList[enabled_list[i]].printTransition();
+		}
+		return;
+	}
+	for (unsigned int i = 0; i < transitionList.size(); i++) {
+		transitionList[i].printTransition();
+	}
+}
+
+void HLPN::initMarking() {
+	marking.resize(placeCount, 1);
+	marking.clear();
+	Token token;
+	token.value = time_seed_value;
+	placeList[0].addToken(token);
+	marking(0,0) = 1;
+	for (unsigned int i = 1 ; i < placeCount ; i++){
+		marking(i,0) = placeList[i].init_token_cnt;
+		for (unsigned int j = 0 ; j < placeList[i].init_token_cnt ; j++){
+			placeList[i].addToken(Token());
+		}
+	}
+
+}
+
+void HLPN::printState() {
+	printMarking();
+	printPlaces();
+	printTransitions();
 }
 
 } // namespace PN

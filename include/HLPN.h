@@ -25,6 +25,12 @@ private:
 	std::vector<Arc> PTArcs;	// list of arcs from places to transitions
 	std::vector<Arc> TPArcs;	// list of arcs from transitions to places
 	boost::numeric::ublas::matrix<double> exprMatrix;	//arc expression matrix
+	double time_step;	//the time step between 2 successive calls to advance(), i.e. sampling time
+	bool constructed;
+	double time_seed_value;	//time factor for execution, >1 is slowing down, <1 is speeding up
+	void updateTimedTransitions(std::vector<int>& enabled_list);
+//	std::vector<int> getEnabledList () const;
+	std::vector<int> getFireList(std::vector<int>& enabled_list);
 	void constructNaivePN(StreamBundle& bundle);	// construct naive PN from bundle
 	void addPlace(const Place& p);
 	void addTransition(const Transition& t);
@@ -36,6 +42,7 @@ private:
 	void fold();	//makes repetitions constructs
 	void merge(Place& p1, Place& p2);	//merges 2 places
 	void updateLists();	//update lists by removing elements marked for deletion and updating IDs
+	void initMarking();
 public:
 	HLPN();
 	HLPN(int p, int t);
@@ -43,10 +50,14 @@ public:
 	virtual ~HLPN();
 
 	void constructPN(StreamBundle& bundle);
-	void advance();		// moves the state forward
+	bool advance();		// moves the state forward
+	bool advance(double time_step);
+	void initPN(double time_step, double time_seed_value = 1);	//inits PN, time_seed_value is the time factor for execution, >1 is slowing down, <1 is speeding up
 	bool findRepetition(int& length, int& count, int& startID, std::vector<Place>& pList);	//finds repeating sequences of places
 	void printPlaces(bool onlyActive = true);
 	void printExprMatrix();
+	void printTransitions(bool enabled_only = true);
+	void printState();
 };
 
 } /* namespace PN */

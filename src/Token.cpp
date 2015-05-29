@@ -9,7 +9,7 @@
 
 namespace PN {
 
-Token::Token() {
+Token::Token() : value(0){
 	// TODO Auto-generated constructor stub
 
 }

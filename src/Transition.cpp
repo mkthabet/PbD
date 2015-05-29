@@ -6,6 +6,7 @@
  */
 
 #include "Transition.h"
+#include <iostream>
 
 namespace PN {
 
@@ -29,12 +30,22 @@ void PN::Transition::addInputPlace(int pID) {
 	inputPlacesIDs.push_back(pID);
 }
 
-void PN::Transition::enableTransition(double timeParameter) {
-	enabled = true;
-	timeRemaining = delay * timeParameter;
+void PN::Transition::resetDelay(double time_factor) {
+	timeRemaining = delay * time_factor;
 }
 
 void PN::Transition::addOutputPlace(int pID) {
 	outputPlacesIDs.push_back(pID);
 }
 
+bool PN::Transition::isTimed() {
+	return (delay > 0.0);
+}
+
+void PN::Transition::printTransition() {
+	std::cout << "Transition: " << ID;
+	if (isTimed()){
+		std::cout << ", delay: " << delay << "time remaining: " << timeRemaining;
+	}
+	std::cout << std::endl;
+}

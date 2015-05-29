@@ -16,7 +16,7 @@ Place::Place() {
 }
 
 Place::Place(int ID, const Symbol& symbol) :
-		ID(ID), symbol(symbol), ordinary(true) , marked4Deletion(false), init_token_cnt(0), type(ORDINARY){
+		ID(ID), symbol(symbol), init_token_cnt(0) , marked4Deletion(false), type(ORDINARY){
 }
 
 Place::~Place() {
@@ -32,7 +32,7 @@ void Place::removeToken() {
 }
 
 void Place::empty() {
-	tokens.empty();
+	tokens.clear();
 }
 
 bool Place::hasTokens() {
@@ -73,10 +73,27 @@ void Place::printPlace() {
 		std::cout << outputTransitionsIDs[i] << ", ";
 	}
 	std::cout << "tokens: " << getTokenCount();
-	if(ordinary && hasTokens()){
-		std::cout << "value: " << tokens[0].value;
+	if(type == ORDINARY && hasTokens()){
+		std::cout << ", value: " << tokens[0].value;
 	}
-	std::cout << std::endl;
+	std::cout << ", type: ";
+	switch (type){
+	case ORDINARY:
+		std::cout << "ORDINARY";
+		break;
+	case AUTO:
+		std::cout << "AUTO";
+		break;
+	case START:
+		std::cout << "START";
+		break;
+	case COUNT:
+		std::cout << "COUNT";
+		break;
+	default:
+		std::cout << "NO TYPE!!";
+	}
+	std::cout << ",init cnt: " << init_token_cnt << std::endl;
 }
 
 } /* namespace PN */
@@ -91,4 +108,6 @@ void PN::Place::operator =(const Place& p) {
 	this->outputTransitionsIDs = p.outputTransitionsIDs;
 	this->symbol = p.symbol;
 	this->marked4Deletion = p.marked4Deletion;
+	this->type = p.type;
+	this->init_token_cnt = p.init_token_cnt;
 }

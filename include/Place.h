@@ -28,7 +28,6 @@ class Place {
 private:
 	int ID;	// must match corresponding index in incidence matrix and index in place list
 	Symbol symbol;	//symbol associated with this place
-	bool ordinary; 	//is this a place for a primitive (false if for something else, like a condition)
 	enum Type {ORDINARY, START, AUTO, COUNT} type;
 	std::vector<Token> tokens;
 	std::vector<int> inputTransitionsIDs;

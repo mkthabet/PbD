@@ -21,10 +21,12 @@ private:
 	double delay;	// delay associated with transition
 	double timeRemaining;	// time remaining till delay is over
 	bool enabled;
+	bool timed;
+	bool synchronized;
 	std::vector<int> inputPlacesIDs;
 	std::vector<int> outputPlacesIDs;
 	bool marked4Deletion;
-	void enableTransition(double timeParameter);
+	void resetDelay(double time_factor = 1);
 public:
 	Transition();
 	Transition(int ID);
@@ -44,6 +46,11 @@ public:
 	const std::vector<int>& getOutputPlacesIDs() const {
 		return outputPlacesIDs;
 	}
+
+	bool isTimed();
+
+	void printTransition();
+
 };
 
 } /* namespace PN */

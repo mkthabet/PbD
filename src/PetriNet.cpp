@@ -58,7 +58,7 @@ std::vector<int> PetriNet::getEnabledList () const{
 	return enabledList;
 }
 
-void PetriNet::advance() {
+bool PetriNet::advance() {
 	charVector.clear();
 	std::vector<int> fireList(getFireList());	// a list of transitions to fire initialized with enabled transitions
 	// now check for conflicts in the fire list and resolve them
@@ -82,6 +82,7 @@ void PetriNet::advance() {
 		charVector(fireList[i],0) = 1;
 	}
 	advance(charVector);
+	return true;
 }
 
 void PetriNet::CalculateConflictMatrix(){
