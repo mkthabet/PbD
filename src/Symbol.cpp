@@ -8,6 +8,7 @@
 #include "Symbol.h"
 
 #include <iostream>
+#include <math.h>
 
 #define GOAL_TOLERANCE_FACTOR 0.1
 #define DURATION_TOLERANCE_FACTOR 0.1
@@ -35,20 +36,20 @@ std::vector<double> Symbol::getGoalState() {
 }
 
 bool Symbol::operator ==(const Symbol& s) {
-	if( (this->primitiveID == s.primitiveID)
-			&& ( this->getDuration() >= (s.getDuration() - s.getDuration()*DURATION_TOLERANCE_FACTOR) )
-			&& ( this->getDuration() <= (s.getDuration() + s.getDuration()*DURATION_TOLERANCE_FACTOR) )
-			&& ( this->goalState[0] >= (s.goalState[0] - s.goalState[0]*GOAL_TOLERANCE_FACTOR) )
-			&& ( this->goalState[0] <= (s.goalState[0] + s.goalState[0]*GOAL_TOLERANCE_FACTOR) )
-			&& ( this->goalState[1] >= (s.goalState[1] - s.goalState[1]*GOAL_TOLERANCE_FACTOR) )
-			&& ( this->goalState[1] <= (s.goalState[1] + s.goalState[1]*GOAL_TOLERANCE_FACTOR) )
-			&& ( this->goalState[2] >= (s.goalState[2] - s.goalState[2]*GOAL_TOLERANCE_FACTOR) )
-			&& ( this->goalState[2] <= (s.goalState[2] + s.goalState[2]*GOAL_TOLERANCE_FACTOR) )
-			){
+	if( (this->componentID == s.componentID)
+			&& (this->primitiveID == s.primitiveID)
+			&& ( fabs(this->getDuration() - s.getDuration()) < s.getDuration()*DURATION_TOLERANCE_FACTOR )
+			&& ( this->goalState.size() == s.goalState.size() )
+			) {
+		for (unsigned int i = 0 ; i < this->goalState.size() ; i++){
+			if ( fabs(this->goalState[i]- s.goalState[i]) > s.goalState[i]*GOAL_TOLERANCE_FACTOR) {
+				return false;
+			}	//end last if
+		}	//end for
 		return true;
-	} else {
+	} else {	//else for first if
 		return false;
-	}
+	}	//end first if
 }
 
 void Symbol::operator =(const Symbol& s) {
