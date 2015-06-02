@@ -11,6 +11,7 @@
 #include <boost/array.hpp>
 
 #include "geometry_msgs/Pose.h"
+#include "sensor_msgs/JointState.h"
 
 namespace iros {
 namespace pbd {

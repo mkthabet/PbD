@@ -106,14 +106,24 @@ void testHLPN() {
 	streamBundle1.addStream(handStream1);
 	HLPN pn;
 	pn.constructPN(streamBundle1);
-	pn.initPN(0.3);
+	pn.initPN(1.0);
 	pn.printIncidence();
 	pn.printConflict();
 	pn.printExprMatrix();
 	pn.printState();
+	std::vector<Symbol> exec_syms;
 	while (pn.advance()){
 		pn.printState();
+		if (pn.getExecSymbols(exec_syms)){
+			for (unsigned int i = 0 ; i < exec_syms.size() ; i++){
+				std::cout << " exec syms: \n";
+				exec_syms[i].printAll();
+				pn.signalExecEnd(exec_syms[i].getSymbolId());
+			}
+		}
+
 	}
+	std::cout << " DONE!: \n";
 
 
 //	std::cout << pn.getEnabledList() << std::endl;

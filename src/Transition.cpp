@@ -44,8 +44,9 @@ bool PN::Transition::isTimed() {
 
 void PN::Transition::printTransition() {
 	std::cout << "Transition: " << ID;
-	if (isTimed()){
-		std::cout << ", delay: " << delay << "time remaining: " << timeRemaining;
+	if (isTimed()) {
+		std::cout << ", delay: " << delay << "time remaining: "
+				<< timeRemaining;
 	}
 	std::cout << std::endl;
 }

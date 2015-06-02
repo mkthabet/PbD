@@ -29,7 +29,7 @@ void HLPN::constructNaivePN(StreamBundle& bundle) {
 	Symbol s;
 	Place p(0, s);
 	p.type = Place::START;
-	p.init_token_cnt = 1;	//the start place should always have a token in the initial marking
+	p.init_token_cnt = 1; //the start place should always have a token in the initial marking
 	addPlace(p);
 	Transition t(0);
 	addTransition(t);
@@ -158,26 +158,9 @@ bool HLPN::advance() {
 	if (enabled_list.size() == 0) {
 		return false;
 	}
+	prev_marking = marking;
 	updateTimedTransitions(enabled_list);
 	std::vector<int> fireList(getFireList(enabled_list));// a list of transitions to fire initialized with enabled transitions
-	// now check for conflicts in the fire list and resolve them
-	for (std::vector<int>::iterator it1 = fireList.begin();
-			it1 != fireList.end(); ++it1) {	//for each enabled transition in list
-//		printList(fireList);
-		for (std::vector<int>::iterator it2 = it1 + 1; it2 != fireList.end();
-				++it2) {	//test against following entries
-			if (conflict(*it1, *it2)) {
-				int transitionToErase = resolveConflict(*it1, *it2);
-				if (transitionToErase == *it2) {
-					fireList.erase(it2);
-				} else {
-					fireList.erase(it1);
-				}
-				it1--;//restart this iteration of outer loop since deleting  entry may lead to skipping one or bad indexing
-				break;
-			}
-		}
-	}
 	// convert fireList into characteristic vector
 	for (unsigned int i = 0; i < fireList.size(); i++) {
 		charVector(fireList[i], 0) = 1;
@@ -192,11 +175,16 @@ bool HLPN::advance() {
 					i < transitionList[j].getInputPlacesIDs().size(); i++) { //go thru all i/p places
 				p = &(placeList[transitionList[j].getInputPlacesIDs()[i]]);
 				for (int k = 0; k < p->getTokenCount(); k++) { //go thru all tokens
-					if (p->tokens[k].value != 0) {	//if this is a colored token
+					if (p->tokens[k].value != 0.0) { //if this is a colored token
 						token.value = p->tokens[k].value;
 					}
-				}// for each transition there will always be a max of 1 i/p place with non-zero token
-				p->empty();	//remove all tokens
+				} // for each transition there will always be a max of 1 i/p place with non-zero token
+				  // make use of the fact that only a count place will still have tokens after firing
+				if (p->type == Place::COUNT) {
+					p->tokens.pop_back();
+				} else {
+					p->empty();	//remove all tokens
+				}
 				if (p->getTokenCount() != marking(p->ID, 0)) {
 					std::cout
 							<< "[HPLN::advance()] Warning: Token count mismatch for place "
@@ -211,7 +199,7 @@ bool HLPN::advance() {
 						* exprMatrix(p->getId(), transitionList[j].getId());// do value transformation
 				p->addToken(tok);	//deposit token
 				for (unsigned int k = 0;
-						k < p->getOutputTransitionsIDs().size(); k++) {	//go thru all o/p t's of that place
+						k < p->getOutputTransitionsIDs().size(); k++) { //go thru all o/p t's of that place
 					if (transitionList[p->getOutputTransitionsIDs()[k]].isTimed()) {
 						transitionList[p->getOutputTransitionsIDs()[k]].resetDelay(
 								time_seed_value);
@@ -241,6 +229,7 @@ void HLPN::consolidateConcurrency() {
 	 * This method goes through the naive PN and consolidates concurrency between different
 	 * 	components. It looks for wait-places (places that are not associated with a primitive)
 	 * 	and binds them with places associated with other components via transitions.
+	 * 	It also sets the delay on timed transition given the initial time seed value
 	 */
 	Place p;		// the wait-place
 	Place pNext;// the place associated with the same component that follows the current wait-place
@@ -409,27 +398,28 @@ void HLPN::fold() {
 
 				}
 				if (found) {
-					break;//no need to check the rest of i/p places
+					break;	//no need to check the rest of i/p places
 				}
 			}
-			if (found){
+			if (found) {
 				// check that it doesn't already have an i/p count place from previous runs
 				for (unsigned int j = 0;
-									j < transitionList[i].inputPlacesIDs.size(); j++){
-					if (placeList[transitionList[i].inputPlacesIDs[j]].type == Place::COUNT){
+						j < transitionList[i].inputPlacesIDs.size(); j++) {
+					if (placeList[transitionList[i].inputPlacesIDs[j]].type
+							== Place::COUNT) {
 						found = false;	//nope, false alarm
 						break;	//no need to check the rest of i/p places
 					}
 				}
 			}
-			if (found){	//if it doesn't already have an i/p count place
+			if (found) {	//if it doesn't already have an i/p count place
 				//create it
-				Place p (placeCount, Symbol());	//dummy symbol
+				Place p(placeCount, Symbol());	//dummy symbol
 				p.type = Place::COUNT;
 				p.init_token_cnt = count;
 				addPlace(p);
 				// bind it as input to the t being process. expr is zero because the colorset of this place is boolean
-				bind(p, transitionList[i] , 1 , 0);
+				bind(p, transitionList[i], 1, 0);
 
 				// if you're reading this code...sorry :) but it's actually the easiest way
 				//I hope the comments make it better though
@@ -620,27 +610,49 @@ void HLPN::updateTimedTransitions(std::vector<int>& enabled_list) {
 
 std::vector<int> HLPN::getFireList(std::vector<int>& enabled_list) {
 	std::vector<int> fire_list;
+	// add enabled timed t's whose time is up
 	for (unsigned int i = 0; i < enabled_list.size(); i++) {
 		if (transitionList[enabled_list[i]].isTimed()
-				&& (transitionList[enabled_list[i]].timeRemaining > 0.0)) {
-			continue;	//don't push this t and skip to the next one in the list
+				&& (transitionList[enabled_list[i]].timeRemaining == 0.0)) {
+			fire_list.push_back(enabled_list[i]);
 		}
-		fire_list.push_back(enabled_list[i]);
+	}
+	// add o/p t's of p's whose execution ended
+	for (unsigned int i = 0; i < exec_end_sigs.size(); i++) {
+		for (unsigned int j = 0;
+				j < placeList[exec_end_sigs[i]].outputTransitionsIDs.size();
+				j++) {
+			// only add the t if it's in the enabled list
+			if (std::find(enabled_list.begin(), enabled_list.end(),
+					placeList[exec_end_sigs[i]].outputTransitionsIDs[j])
+					!= enabled_list.end()) {
+				fire_list.push_back(
+						placeList[exec_end_sigs[i]].outputTransitionsIDs[j]);
+			}
+		}
+	}
+	exec_end_sigs.clear();	// pep the list for new signals
+
+	// now check for conflicts in the fire list and resolve them
+	for (std::vector<int>::iterator it1 = fire_list.begin();
+			it1 != fire_list.end(); ++it1) {//for each enabled transition in list
+//		printList(fireList);
+		for (std::vector<int>::iterator it2 = it1 + 1; it2 != fire_list.end();
+				++it2) {	//test against following entries
+			if (conflict(*it1, *it2)) {
+				int transitionToErase = resolveConflict(*it1, *it2);
+				if (transitionToErase == *it2) {
+					fire_list.erase(it2);
+				} else {
+					fire_list.erase(it1);
+				}
+				it1--;//restart this iteration of outer loop since deleting  entry may lead to skipping one or bad indexing
+				break;
+			}
+		}
 	}
 	return fire_list;
 }
-
-//std::vector<int> HLPN::getEnabledList() const {
-//	std::vector<int> enabledList;
-//		for (int i=0; i<placeCount; i++){	//examine each element corresponding to a place
-//			if (marking(i,0) > 0){	//if this place is not empty
-//				for (int j=0 ; j<placeList[i].outputTransitionsIDs.size() ; i++) {
-//
-//				}
-//			}
-//		}
-//	return enabledList;
-//}
 
 bool HLPN::advance(double time_step) {
 	this->time_step = time_step;
@@ -657,6 +669,7 @@ void HLPN::initPN(double time_step, double time_seed_value) {
 	this->time_step = time_step;
 	this->time_seed_value = time_seed_value;
 	initMarking();
+	exec_end_sigs.push_back(0);	// so that the start place o/p transition gets fired on the fist call to advance()
 	constructIncidence();
 	charVector.resize(transitionCount, 1);
 	charVector.clear();
@@ -686,14 +699,80 @@ void HLPN::initMarking() {
 	Token token;
 	token.value = time_seed_value;
 	placeList[0].addToken(token);
-	marking(0,0) = 1;
-	for (unsigned int i = 1 ; i < placeCount ; i++){
-		marking(i,0) = placeList[i].init_token_cnt;
-		for (unsigned int j = 0 ; j < placeList[i].init_token_cnt ; j++){
+	marking(0, 0) = 1;
+	for (int i = 1; i < placeCount; i++) {
+		marking(i, 0) = placeList[i].init_token_cnt;
+		for (int j = 0; j < placeList[i].init_token_cnt; j++) {
 			placeList[i].addToken(Token());
 		}
 	}
 
+}
+
+bool HLPN::getExecSymbols(std::vector<Symbol>& exec_syms) {
+	/****************
+	 * This function finds ordinary non-wait places that have just been activated (became non-empty)
+	 * and returns true if it found any. the vector syms is passed by reference to the function
+	 * and is filled with execution symbols associated with these places. The id of the each returned execution
+	 * symbol holds the id of its associated place. This is important for signaling execution end later.
+	 *****************/
+	exec_syms.clear();	//always clear the vector before filling it
+	boost::numeric::ublas::matrix<int> state_diff = marking - prev_marking;
+	//exploit the fact that ordinary places associated with a non-wait symbol always have a capacity of 1
+	// so if there's a change in marking it's always 1
+	for (int i = 0; i < placeCount; i++) {
+		if ((state_diff(i, 0) == 1) && (placeList[i].type == Place::ORDINARY)
+				&& (placeList[i].symbol.getPrimitiveId() != 0)) {
+			//the start time of the exec_sym is always 0, and the end time is equal to the value of the p's colored token
+			Symbol exec_sym(placeList[i].symbol.getPrimitiveId(), 0,
+					placeList[i].tokens.front().value,//ordinary non-wait symbol always have a capacity of 1
+					placeList[i].symbol.getGoalState());
+			exec_sym.setSymbolId(placeList[i].ID);
+			exec_sym.setComponentId(placeList[i].symbol.getComponentId());
+			exec_syms.push_back(exec_sym);
+		}
+	}
+	if (exec_syms.size() > 0) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+void HLPN::signalExecEnd(int p_id) {
+	/*********
+	 * This functions should be called when an exec symbol fetched earlier finishes execution
+	 *********/
+	if (marking(p_id, 0) != 1) {
+		std::cout
+				<< "WARNING: signaled the end of an incorrect execution symbol id!"
+				<< std::endl;
+	} else {
+		exec_end_sigs.push_back(p_id);
+	}
+}
+
+int HLPN::resolveConflict(int t1_id, int t2_id) {
+	/**********
+	 * This function resolves the conflict between two conflicting enabled transitions ad returns the id of the loser
+	 * Currently there can only be conflict between a looping t and an exit t in a loop, and we always favor looping
+	 ***********/
+	for (unsigned int i = 0;
+			i < transitionList[t1_id].getInputPlacesIDs().size(); i++) {
+		if (placeList[transitionList[t1_id].getInputPlacesIDs()[i]].type
+				== Place::COUNT) {
+			return t2_id;
+		}
+	}
+	for (unsigned int i = 0;
+			i < transitionList[t2_id].getInputPlacesIDs().size(); i++) {
+		if (placeList[transitionList[t2_id].getInputPlacesIDs()[i]].type
+				== Place::COUNT) {
+			return t1_id;
+		}
+	}
+	// default case
+	return t2_id;
 }
 
 void HLPN::printState() {
